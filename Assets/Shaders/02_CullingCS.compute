@@ -33,13 +33,13 @@ cbuffer CB
     uint _ShouldDetailCull;
     uint _ShouldLOD;
     uint _ShouldOnlyUseLOD02Shadows;
-    
+
     int _ShadowCascades;
     float _ShadowDistance;
     float _DetailCullingScreenPercentage;
     float2 _HiZTextureSize;
     float3 _CamPosition;
-    
+
     float4x4 _UNITY_MATRIX_MVP;
     Texture2D<float4> _HiZMap;
     SamplerState sampler_HiZMap; // "sampler" + “_HiZMap”
@@ -78,28 +78,28 @@ inline uint IsVisibleAfterDetailCulling(float clipMinX, float clipMaxX, float cl
 // Hi-Z Culling
 inline uint IsVisibleAfterOcclusionCulling(InstanceData instance, float clipMinX, float clipMaxX, float clipMinY, float clipMaxY, float clipMinZ)
 {
-    // Change it to 0 - 1 range 
+    // Change it to 0 - 1 range
     float2 minXY = float2(clipMinX, clipMinY) * 0.5 + 0.5;
     float2 maxXY = float2(clipMaxX, clipMaxY) * 0.5 + 0.5;
-    
+
     // Calculate hi-Z buffer mip
     int2 size = (maxXY - minXY) * _HiZTextureSize.xy;
     float mip = ceil(log2(max(size.x, size.y)));
     mip = clamp(mip, 0, 10);
-    
+
     // Texel footprint for the lower (finer-grained) level
     float  level_lower = max(mip - 1, 0);
     float2 scale = exp2(-level_lower);
     float2 a = floor(minXY * scale);
     float2 b = ceil(maxXY * scale);
     float2 dims = b - a;
-    
+
     // Use the lower level if we only touch <= 2 texels in both dimensions
     if (dims.x <= 2 && dims.y <= 2)
     {
         mip = level_lower;
     }
-    
+
     // find the max depth
     // Hi-Z approach that allows for more samples.
     // https://www.gamedev.net/blogs/entry/2249535-hierarchical-z-buffer-occlusion-culling-updated-07152011/
@@ -107,12 +107,12 @@ inline uint IsVisibleAfterOcclusionCulling(InstanceData instance, float clipMinX
     const   int   xSamples = 8; // numSamples + 1;
     const   int   ySamples = 25; // numSamples + 1;
     const  float    widthSS = (maxXY.x - minXY.x);
-    const  float   heightSS = (maxXY.y - minXY.y);    
-    const  float  maxSizeSS = max(widthSS * _HiZTextureSize.x, heightSS * _HiZTextureSize.y);    
-    const  float      stepX = widthSS / xSamples;    
-    const  float      stepY = heightSS / ySamples;    
-    
-    float HIZdepth = 1;    
+    const  float   heightSS = (maxXY.y - minXY.y);
+    const  float  maxSizeSS = max(widthSS * _HiZTextureSize.x, heightSS * _HiZTextureSize.y);
+    const  float      stepX = widthSS / xSamples;
+    const  float      stepY = heightSS / ySamples;
+
+    float HIZdepth = 1;
     float yPos = minXY.y;
     for(int y = 0; y < ySamples; ++y)
     {
@@ -123,19 +123,19 @@ inline uint IsVisibleAfterOcclusionCulling(InstanceData instance, float clipMinX
             HIZdepth = min(HIZdepth, _HiZMap.SampleLevel(sampler_HiZMap, nCoords0, mip).r);
             xPos += stepX;
         }
-        yPos += stepY;    
+        yPos += stepY;
     }
-    
+
     return (1.0 - clipMinZ) >= HIZdepth - 0.000015; // last is an epsilon
 }
 
 inline uint IsVisibleAfterFrustumCulling(float4 clipPos)
 {
-    return (clipPos.z > clipPos.w 
-            || clipPos.x < -clipPos.w 
-            || clipPos.x > clipPos.w 
-            || clipPos.y < -clipPos.w 
-            || clipPos.y > clipPos.w) 
+    return (clipPos.z > clipPos.w
+            || clipPos.x < -clipPos.w
+            || clipPos.x > clipPos.w
+            || clipPos.y < -clipPos.w
+            || clipPos.y > clipPos.w)
             ? 0 : 1;
 }
 
@@ -147,14 +147,17 @@ inline uint IsVisibleAfterFrustumCulling(float4 clipPos)
 inline void CSMain (
         in uint3 _dispatchThreadID : SV_DispatchThreadID, // DispatchThreadID  = dot(GroupID, numthreads) + GroupThreadId;
         in uint  _groupIndex       : SV_GroupIndex, // uint GroupIndex = unique index of a thread inside a group
-        in uint3 _groupID          : SV_GroupID, // GroupID = index for each dimension inside a ThreadGroupCount 
+        in uint3 _groupID          : SV_GroupID, // GroupID = index for each dimension inside a ThreadGroupCount
         in uint3 _groupThreadID    : SV_GroupThreadID // uint3 GroupThreadId = indices for each dimension inside a group of the current thread
     )
 {
     // Calculate the instance index
     uint tID = _dispatchThreadID.x;
     SortingData sortingData = _SortingData[tID];
+    // 이건 ArgsBuffer 의 시작 인덱스.... 아마도 instance count 를 증가시키기 위함인 것 같다..
     uint drawCall = (sortingData.drawCallInstanceIndex >> 16);
+    // 이것은 현재 인스턴스의 원본 인덱스 (원본 matrix 정보 같은 것에 접근하려면 이 인덱스가 필요할 것 같다..)
+    // tId 와 같은 값으로 생각할 수도 있는데... 현재 InstanceDataBuffer 를 제외한 모든 버퍼는 RW 이다.. 즉 tId 와 index 가 달라질 수 있다..
     uint index = (sortingData.drawCallInstanceIndex) & 0xFFFF;
 
     // Reset the is visible state
@@ -162,6 +165,7 @@ inline void CSMain (
     _ShadowIsVisibleBuffer[tID] = 0;
 
     // Get the instance data
+    // 원본 인스턴스 데이터를 접근하기 위해서는 원본 인덱스가 필요하다..
     InstanceData instance = _InstanceDataBuffer[index];
 
     // Check if the instance is visible
@@ -195,6 +199,7 @@ inline void CSMain (
         clipPos = mul(_UNITY_MATRIX_MVP, boxCorners[i]);
 
         // For Frustum
+        // isInFrustum 이 1 이면 그려지는 인스턴스..
         isInFrustum = saturate(isInFrustum + IsVisibleAfterFrustumCulling(clipPos));
 
         // For HiZ
@@ -209,9 +214,11 @@ inline void CSMain (
         minDistanceToCamera = min(distance(boxCorners[i].xyz, _CamPosition.xyz), minDistanceToCamera);
     }
 
-    // We only cull instances where the camera doesn't intersect the instance 
+    // We only cull instances where the camera doesn't intersect the instance
     // bounds. If the camera is inside the bounds we want to render the object
     uint isVisible = 1;
+    // 오브젝트 바운드 내에 카메라가 위치 (오브젝트와 카메라가 매우 가까이에 있음) 하면 항상 그린다..
+    // 그렇지 않은 경우에만 isInFrustum 등등을 확인해서 isVisible 을 갱신한다...
     if (IsCameraOutsideObjBounds(_CamPosition, minPos, maxPos))
     {
         // Do we pass the frustum culling...?
@@ -228,11 +235,17 @@ inline void CSMain (
     float lod01Range = LOD01_RANGE;
 
     // Calculate the correct index to the arguments buffers
-    uint argsIndex = drawCall + 1;    
-    argsIndex += 5 * (minDistanceToCamera > lod00Range);
-    argsIndex += 5 * (minDistanceToCamera > lod01Range);
+    //
+    // 0 - index count per instance,
+    // 1 - instance count
+    // 2 - start index location
+    // 3 - base vertex location
+    // 4 - start instance location
+    uint argsIndex = drawCall + 1;  // +1 이니까 instance count 임...
+    argsIndex += 5 * (minDistanceToCamera > lod00Range);    // 멀리 있으면 lod 1로 변경..
+    argsIndex += 5 * (minDistanceToCamera > lod01Range);    // 더 멀리 있으면 lod 2로 변경..
     argsIndex = _ShouldLOD * argsIndex + ((_ShouldLOD == 0) * (drawCall + 11));
-    
+
     uint shadowArgsIndex = argsIndex;//_ShouldOnlyUseLOD02Shadows ? drawCall + 11 : argsIndex;
 
     // Mark it as a shadow caster if it's within shadow distance...
